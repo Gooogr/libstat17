@@ -5,6 +5,7 @@ import pandas as pd
 import regex
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import AttributeValueList
 from pydantic import BaseModel
 
 
@@ -56,8 +57,10 @@ def extract_link_from_html(html: str) -> str | None:
     a = soup.select_one('a[href*="vk.com"]') or soup.select_one("a[href]")
     if not a:
         return None
-    href = (a.get("href") or "").strip()
-    return href or None
+    
+    raw = a.get("href", "")
+    href = " ".join(raw) if isinstance(raw, AttributeValueList) else str(raw)
+    return href.strip() or None
 
 
 def extract_link_from_feature(f: dict) -> str | None:
