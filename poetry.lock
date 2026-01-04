@@ -1050,6 +1050,22 @@ files = [
 ]
 
 [[package]]
+name = "tenacity"
+version = "9.1.2"
+description = "Retry code until it succeeds"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "tenacity-9.1.2-py3-none-any.whl", hash = "sha256:f77bf36710d8b73a50b2dd155c97b870017ad21afe6ab300326b0371b3b05138"},
+    {file = "tenacity-9.1.2.tar.gz", hash = "sha256:1169d376c297e7de388d18b4481760d478b0e99a777cad3a9c86e556f4b697cb"},
+]
+
+[package.extras]
+doc = ["reno", "sphinx"]
+test = ["pytest", "tornado (>=4.5)", "typeguard"]
+
+[[package]]
 name = "tomli"
 version = "2.3.0"
 description = "A lil' TOML parser"
@@ -1220,4 +1236,4 @@ vkstreaming = ["websocket-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "048758a61c5bc3597905f0dd092926380ac5ae141f8bb5a54c91c50fe72bcd3b"
+content-hash = "82ef02a8a4142c01fce304571d51f4ee48b2f22f72ee73c84d369b150a4aab0f"
