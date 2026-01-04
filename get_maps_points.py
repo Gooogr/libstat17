@@ -15,9 +15,9 @@ class Place(BaseModel):
     lat: float
     lon: float
     link: str | None
-    
-MAP_URL = "https://yandex.ru/maps/?l=mrc&ll=53.493467%2C65.320153&mode=usermaps&source=constructorLink&um=constructor%3Abd8db10fcecef60526f6343abd593ecd7f841eff949a8362c457bd23497aa933&z=12.6"
 
+
+MAP_URL = "https://yandex.ru/maps/?l=mrc&ll=53.493467%2C65.320153&mode=usermaps&source=constructorLink&um=constructor%3Abd8db10fcecef60526f6343abd593ecd7f841eff949a8362c457bd23497aa933&z=12.6"
 
 
 def extract_constructor_id(maps_url: str) -> str | None:
@@ -29,17 +29,14 @@ def extract_constructor_id(maps_url: str) -> str | None:
 
 def build_widget_urls(constructor_id: str, lang: str = "ru_RU") -> list[str]:
     um = quote(f"constructor:{constructor_id}")
-    out: list[str] = []
-    for domain in ("yandex.com", "yandex.ru"):
-        for source in ("constructor", "constructor-api"):
-            out.append(
-                f"https://{domain}/map-widget/v1/?lang={lang}&scroll=true&source={source}&um={um}"
-            )
-    return out
+    return [
+        f"https://{d}/map-widget/v1/?lang={lang}&scroll=true&source={s}&um={um}"
+        for d in ("yandex.com", "yandex.ru")
+        for s in ("constructor", "constructor-api")
+    ]
 
 
 def extract_user_map_from_html(html: str) -> dict | None:
-    # balanced JSON object after "userMap":
     m = regex.search(r'"userMap"\s*:\s*(\{(?:[^{}]|(?1))*\})', html or "")
     if not m:
         return None
@@ -57,9 +54,9 @@ def extract_link_from_html(html: str) -> str | None:
     a = soup.select_one('a[href*="vk.com"]') or soup.select_one("a[href]")
     if not a:
         return None
-    
-    raw = a.get("href", "")
-    href = " ".join(raw) if isinstance(raw, AttributeValueList) else str(raw)
+
+    raw = a.get("href")
+    href = " ".join(raw) if isinstance(raw, AttributeValueList) else str(raw or "")
     return href.strip() or None
 
 
@@ -73,7 +70,6 @@ def extract_link_from_feature(f: dict) -> str | None:
         return extract_link_from_html(content.get("text") or "")
     if isinstance(content, str):
         return extract_link_from_html(content)
-
     return None
 
 
@@ -84,23 +80,24 @@ def places_from_user_map(user_map: dict) -> list[Place]:
 
     valid: list[dict] = []
     for f in feats:
-        if not isinstance(f, dict):
-            continue
-        coords = f.get("coordinates")
+        coords = f.get("coordinates") if isinstance(f, dict) else None
         if isinstance(coords, list) and len(coords) >= 2:
             valid.append(f)
 
     total = len(valid)
     places: list[Place] = []
 
-    # Yandex list numbering is reversed: first feature == number total
-    for idx, f in enumerate(valid, start=1):
-        coords = f["coordinates"]
-        lon, lat = float(coords[0]), float(coords[1])
-        name = str(f.get("title") or f.get("caption") or "unknown").strip()
-        link = extract_link_from_feature(f)
-        number = total - idx + 1
-        places.append(Place(number=number, name=name, lat=lat, lon=lon, link=link))
+    for i, f in enumerate(valid):
+        lon, lat = f["coordinates"][:2]
+        places.append(
+            Place(
+                number=total - i,
+                name=str(f.get("title") or f.get("caption") or "unknown").strip(),
+                lat=float(lat),
+                lon=float(lon),
+                link=extract_link_from_feature(f),
+            )
+        )
 
     return places
 
@@ -127,8 +124,7 @@ def parse_places_from_constructor(maps_url: str) -> list[Place]:
         except requests.RequestException:
             continue
 
-        text = r.text or ""
-        user_map = extract_user_map_from_html(text)
+        user_map = extract_user_map_from_html(r.text)
         if user_map:
             places = places_from_user_map(user_map)
             if places:
@@ -138,8 +134,7 @@ def parse_places_from_constructor(maps_url: str) -> list[Place]:
 
 
 def save_csv(places: list[Place], path: str) -> None:
-    df = pd.DataFrame([p.model_dump() for p in places], columns=["number", "name", "lat", "lon", "link"])
-    df.fillna("").to_csv(path, index=False)
+    pd.DataFrame([p.model_dump() for p in places]).to_csv(path, index=False)
 
 
 if __name__ == "__main__":
