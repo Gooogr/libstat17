@@ -1,17 +1,21 @@
 import argparse
+import csv
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
+from tqdm import tqdm
 
 from lib.clients.vk import VKClient
 
 load_dotenv()
 
 DEFAULT_GROUP_FIELDS = "screen_name,name,is_closed,description,members_count"
-
+DEFAULT_OUT = Path("data/external/group_data.json") # for --group
+DEFAULT_OUTDIR = Path("data/external/groups")       # for --csv
 
 class GroupDTO(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -64,9 +68,7 @@ class VKBoardService:
 
     def dump_board(self, group: GroupDTO) -> BoardDumpDTO:
         topics: list[TopicDTO] = []
-        for t in self.client.paginate(
-            self.client.api.board.getTopics, group_id=group.id
-        ):
+        for t in self.client.paginate(self.client.api.board.getTopics, group_id=group.id):
             topic_id = int(t["id"])
             title = (t.get("title") or "").strip()
             topics.append(
@@ -79,14 +81,64 @@ class VKBoardService:
         return BoardDumpDTO(group=group, topics=topics)
 
 
+@dataclass(frozen=True)
+class Task:
+    place_id: str
+    url: str
+
+
+def read_tasks(csv_path: Path) -> list[Task]:
+    with csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        return [Task(place_id=str(row["number"]), url=str(row["link"])) for row in reader]
+
+
+def write_dump(path: Path, dump: BoardDumpDTO) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(dump.model_dump(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def process_one(service: VKBoardService, url: str, out: Path) -> bool:
+    group = service.get_group(url)
+    if not group:
+        return False
+    dump = service.dump_board(group)
+    write_dump(out, dump)
+    return True
+
+
+def process_many(service: VKBoardService, csv_path: Path, outdir: Path) -> None:
+    tasks = read_tasks(csv_path)
+
+    ok = 0
+    skipped = 0
+
+    for t in tqdm(tasks):
+        out = outdir / f"place_{t.place_id}.json"
+        try:
+            if process_one(service, t.url, out):
+                ok += 1
+            else:
+                skipped += 1
+        except Exception:
+            skipped += 1
+
+    print(f"saved={ok} skipped={skipped} outdir={outdir}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--group", required=True)
-    ap.add_argument("--token", default=None)
-    ap.add_argument("--out", default=None)
-    args = ap.parse_args()
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--group")
+    src.add_argument("--csv")
 
-    token = args.token or os.getenv("VK_TOKEN", "")
+    ap.add_argument("--out")
+    ap.add_argument("--outdir")
+    ap.add_argument("--token", default=None)
+    args = ap.parse_args()
 
     token = (args.token or os.getenv("VK_TOKEN") or "").strip()
     if not token:
@@ -94,22 +146,22 @@ def main() -> None:
 
     client = VKClient(token)
     service = VKBoardService(client, fields=DEFAULT_GROUP_FIELDS)
-    group = service.get_group(args.group)
-    if not group:
-        print("Failed to find group, exit")
+
+    if args.group:
+        out = Path(args.out) if args.out else DEFAULT_OUT
+        try:
+            ok = process_one(service, args.group, out)
+        except Exception as e:
+            raise SystemExit(f"Error: {e}") from e
+        if not ok:
+            print("Failed to find group, exit")
+            return
+        print(f"saved={out}")
         return
 
-    dump = service.dump_board(group)
-
-    out = Path(args.out) if args.out else Path(f"vk_board_{dump.group.id}.json")
-    out.write_text(
-        json.dumps(dump.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-    total_msgs = sum(len(t.messages) for t in dump.topics)
-    print(
-        f"group_id={dump.group.id} topics={len(dump.topics)} messages={total_msgs} saved={out}"
-    )
+    csv_path = Path(args.csv)
+    outdir = Path(args.outdir) if args.outdir else DEFAULT_OUTDIR
+    process_many(service, csv_path, outdir)
 
 
 if __name__ == "__main__":
