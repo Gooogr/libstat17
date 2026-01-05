@@ -1,3 +1,4 @@
+import argparse
 import json
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -9,7 +10,7 @@ from bs4.element import AttributeValueList
 from pydantic import BaseModel
 
 
-class Place(BaseModel):
+class Point(BaseModel):
     number: int
     name: str
     lat: float
@@ -18,6 +19,8 @@ class Place(BaseModel):
 
 
 MAP_URL = "https://yandex.ru/maps/?l=mrc&ll=53.493467%2C65.320153&mode=usermaps&source=constructorLink&um=constructor%3Abd8db10fcecef60526f6343abd593ecd7f841eff949a8362c457bd23497aa933&z=12.6"
+EMPTY_POINT_NAME = "пустой номер"
+DEFAULT_SAVING_PATH = "data/external/geo_points.csv"
 
 
 def extract_constructor_id(maps_url: str) -> str | None:
@@ -27,13 +30,9 @@ def extract_constructor_id(maps_url: str) -> str | None:
     return um.split("constructor:", 1)[1]
 
 
-def build_widget_urls(constructor_id: str, lang: str = "ru_RU") -> list[str]:
+def build_widget_url(constructor_id: str, lang: str = "ru_RU") -> str:
     um = quote(f"constructor:{constructor_id}")
-    return [
-        f"https://{d}/map-widget/v1/?lang={lang}&scroll=true&source={s}&um={um}"
-        for d in ("yandex.com", "yandex.ru")
-        for s in ("constructor", "constructor-api")
-    ]
+    return f"https://yandex.com/map-widget/v1/?lang=ru_RU&scroll=true&source=constructor&um={um}"
 
 
 def extract_user_map_from_html(html: str) -> dict | None:
@@ -73,7 +72,7 @@ def extract_link_from_feature(f: dict) -> str | None:
     return None
 
 
-def places_from_user_map(user_map: dict) -> list[Place]:
+def points_from_user_map(user_map: dict) -> list[Point]:
     feats = user_map.get("features") or []
     if not isinstance(feats, list):
         return []
@@ -85,12 +84,12 @@ def places_from_user_map(user_map: dict) -> list[Place]:
             valid.append(f)
 
     total = len(valid)
-    places: list[Place] = []
+    points: list[Point] = []
 
     for i, f in enumerate(valid):
         lon, lat = f["coordinates"][:2]
-        places.append(
-            Place(
+        points.append(
+            Point(
                 number=total - i,
                 name=str(f.get("title") or f.get("caption") or "unknown").strip(),
                 lat=float(lat),
@@ -99,10 +98,10 @@ def places_from_user_map(user_map: dict) -> list[Place]:
             )
         )
 
-    return places
+    return points
 
 
-def parse_places_from_constructor(maps_url: str) -> list[Place]:
+def parse_points_from_constructor(maps_url: str) -> list[Point]:
     cid = extract_constructor_id(maps_url)
     if not cid:
         return []
@@ -118,26 +117,37 @@ def parse_places_from_constructor(maps_url: str) -> list[Place]:
         }
     )
 
-    for url in build_widget_urls(cid):
-        try:
-            r = sess.get(url, timeout=20)
-        except requests.RequestException:
-            continue
+    url = build_widget_url(cid)
+    try:
+        r = sess.get(url, timeout=20)
+    except requests.RequestException:
+        return []
 
-        user_map = extract_user_map_from_html(r.text)
-        if user_map:
-            places = places_from_user_map(user_map)
-            if places:
-                return places
-
-    return []
+    user_map = extract_user_map_from_html(r.text)
+    if not user_map:
+        return []
+    places = points_from_user_map(user_map)
+    return places
 
 
-def save_csv(places: list[Place], path: str) -> None:
-    pd.DataFrame([p.model_dump() for p in places]).to_csv(path, index=False)
+def is_empty_point(point: Point) -> bool:
+    if not point.link:
+        return True
+    if point.name == EMPTY_POINT_NAME:
+        return True
+    return False
+
+
+def save_csv(points: list[Point], path: str) -> None:
+    df = pd.DataFrame([p.model_dump() for p in points if not is_empty_point(p)])
+    df.to_csv(path, index=False)
 
 
 if __name__ == "__main__":
-    places = parse_places_from_constructor(MAP_URL)
-    save_csv(places, "libraries.csv")
-    print(f"Parsed {len(places)} rows")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+
+    points = parse_points_from_constructor(MAP_URL)
+    save_csv(points, args.out or DEFAULT_SAVING_PATH)
+    print(f"Parsed {len(points)} rows")
