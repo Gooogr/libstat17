@@ -2,12 +2,12 @@ from urllib.parse import urlencode
 
 BASE_URL = "https://oauth.vk.com/authorize"
 PARAMS = {
-        "client_id": "6121396",
-        "redirect_uri": "https://oauth.vk.com/blank.html",
-        "response_type": "token",
-        "scope": "offline", # for long-lived token, details: https://stackoverflow.com/a/27107324
-        "v": "5.131",
-    }
+    "client_id": "6121396",
+    "redirect_uri": "https://oauth.vk.com/blank.html",
+    "response_type": "token",
+    "scope": "offline",  # for long-lived token, details: https://stackoverflow.com/a/27107324
+    "v": "5.131",
+}
 
 
 def prompt_token() -> None:
