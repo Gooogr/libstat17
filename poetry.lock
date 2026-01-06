@@ -2125,6 +2125,21 @@ files = [
 urllib3 = ">=2"
 
 [[package]]
+name = "types-tqdm"
+version = "4.67.0.20250809"
+description = "Typing stubs for tqdm"
+optional = false
+python-versions = ">=3.9"
+groups = ["dev"]
+files = [
+    {file = "types_tqdm-4.67.0.20250809-py3-none-any.whl", hash = "sha256:1a73053b31fcabf3c1f3e2a9d5ecdba0f301bde47a418cd0e0bdf774827c5c57"},
+    {file = "types_tqdm-4.67.0.20250809.tar.gz", hash = "sha256:02bf7ab91256080b9c4c63f9f11b519c27baaf52718e5fdab9e9606da168d500"},
+]
+
+[package.dependencies]
+types-requests = "*"
+
+[[package]]
 name = "typing-extensions"
 version = "4.15.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
