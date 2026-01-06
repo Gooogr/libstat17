@@ -6,37 +6,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field
 from tqdm import tqdm
 
-from lib.clients.vk import VKClient
+from scripts.dto_group import Board, Group, Topic
+from src.clients.vk import VKClient  # type: ignore[import-untyped]
 
 load_dotenv()
 
 DEFAULT_GROUP_FIELDS = "screen_name,name,is_closed,description,members_count"
-DEFAULT_OUT = Path("data/external/group_data.json") # for --group
-DEFAULT_OUTDIR = Path("data/external/groups")       # for --csv
-
-class GroupDTO(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id: int
-    name: str | None = None
-    screen_name: str | None = None
-    members_count: int | None = None
-    is_closed: int | None = None
-    description: str | None = None
-
-
-class TopicDTO(BaseModel):
-    topic_id: int
-    title: str = ""
-    messages: list[str] = Field(default_factory=list)
-
-
-class BoardDumpDTO(BaseModel):
-    group: GroupDTO
-    topics: list[TopicDTO] = Field(default_factory=list)
+DEFAULT_OUT = Path("data/external/group_data.json")  # for --group
+DEFAULT_OUTDIR = Path("data/external/groups")  # for --csv
 
 
 class VKBoardService:
@@ -44,7 +23,7 @@ class VKBoardService:
         self.client = client
         self.fields = fields
 
-    def get_group(self, group_input: str) -> GroupDTO | None:
+    def get_group(self, group_input: str) -> Group | None:
         slug = self.client.slug(group_input)
         if not slug:
             return None
@@ -54,7 +33,7 @@ class VKBoardService:
             )
             or []
         )
-        return GroupDTO.model_validate(items[0]) if items else None
+        return Group.model_validate(items[0]) if items else None
 
     def get_topic_messages(self, group_id: int, topic_id: int) -> list[str]:
         out: list[str] = []
@@ -66,19 +45,21 @@ class VKBoardService:
                 out.append(text)
         return out
 
-    def dump_board(self, group: GroupDTO) -> BoardDumpDTO:
-        topics: list[TopicDTO] = []
-        for t in self.client.paginate(self.client.api.board.getTopics, group_id=group.id):
+    def dump_board(self, group: Group) -> Board:
+        topics: list[Topic] = []
+        for t in self.client.paginate(
+            self.client.api.board.getTopics, group_id=group.id
+        ):
             topic_id = int(t["id"])
             title = (t.get("title") or "").strip()
             topics.append(
-                TopicDTO(
+                Topic(
                     topic_id=topic_id,
                     title=title,
                     messages=self.get_topic_messages(group.id, topic_id),
                 )
             )
-        return BoardDumpDTO(group=group, topics=topics)
+        return Board(group=group, topics=topics)
 
 
 @dataclass(frozen=True)
@@ -90,10 +71,12 @@ class Task:
 def read_tasks(csv_path: Path) -> list[Task]:
     with csv_path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
-        return [Task(place_id=str(row["number"]), url=str(row["link"])) for row in reader]
+        return [
+            Task(place_id=str(row["number"]), url=str(row["link"])) for row in reader
+        ]
 
 
-def write_dump(path: Path, dump: BoardDumpDTO) -> None:
+def write_dump(path: Path, dump: Board) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(dump.model_dump(), ensure_ascii=False, indent=2),
