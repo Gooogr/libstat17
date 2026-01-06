@@ -8,8 +8,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from lib.clients.client_vk import VKClient  # type: ignore[import-untyped]
 from scripts.dto_group import Board, Group, Topic
+from src.clients.vk import VKClient  # type: ignore[import-untyped]
 
 load_dotenv()
 
