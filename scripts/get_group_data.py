@@ -1,82 +1,37 @@
 import argparse
-import csv
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from scripts.dto_group import Board, Group, Topic
-from src.clients.vk import VKClient  # type: ignore[import-untyped]
+from src.clients.vk import VKClient
+from src.dto_group import BoardWithPlaceId
+from src.services.board import VKBoardService  # type: ignore[import-untyped]
 
 load_dotenv()
 
-DEFAULT_GROUP_FIELDS = "screen_name,name,is_closed,description,members_count"
 DEFAULT_OUT = Path("data/external/group_data.json")  # for --group
 DEFAULT_OUTDIR = Path("data/external/groups")  # for --csv
 
 
-class VKBoardService:
-    def __init__(self, client: VKClient, fields: str = DEFAULT_GROUP_FIELDS):
-        self.client = client
-        self.fields = fields
-
-    def get_group(self, group_input: str) -> Group | None:
-        slug = self.client.slug(group_input)
-        if not slug:
-            return None
-        items = (
-            self.client.call(
-                self.client.api.groups.getById, group_ids=slug, fields=self.fields
-            )
-            or []
-        )
-        return Group.model_validate(items[0]) if items else None
-
-    def get_topic_messages(self, group_id: int, topic_id: int) -> list[str]:
-        out: list[str] = []
-        for c in self.client.paginate(
-            self.client.api.board.getComments, group_id=group_id, topic_id=topic_id
-        ):
-            text = (c.get("text") or "").strip()
-            if text:
-                out.append(text)
-        return out
-
-    def dump_board(self, group: Group) -> Board:
-        topics: list[Topic] = []
-        for t in self.client.paginate(
-            self.client.api.board.getTopics, group_id=group.id
-        ):
-            topic_id = int(t["id"])
-            title = (t.get("title") or "").strip()
-            topics.append(
-                Topic(
-                    topic_id=topic_id,
-                    title=title,
-                    messages=self.get_topic_messages(group.id, topic_id),
-                )
-            )
-        return Board(group=group, topics=topics)
-
-
 @dataclass(frozen=True)
 class Task:
-    place_id: str
+    place_id: int
     url: str
 
 
 def read_tasks(csv_path: Path) -> list[Task]:
-    with csv_path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        return [
-            Task(place_id=str(row["number"]), url=str(row["link"])) for row in reader
-        ]
+    df = pd.read_csv(
+        csv_path, usecols=["number", "link"], dtype={"number": int, "link": str}
+    )
+    return [Task(place_id=id, url=url) for id, url in zip(df.number, df.link)]
 
 
-def write_dump(path: Path, dump: Board) -> None:
+def write_dump(path: Path, dump: BoardWithPlaceId) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(dump.model_dump(), ensure_ascii=False, indent=2),
@@ -84,12 +39,15 @@ def write_dump(path: Path, dump: Board) -> None:
     )
 
 
-def process_one(service: VKBoardService, url: str, out: Path) -> bool:
+def process_one(
+    service: VKBoardService, url: str, out: Path, place_id: int | None = None
+) -> bool:
     group = service.get_group(url)
     if not group:
         return False
-    dump = service.dump_board(group)
-    write_dump(out, dump)
+    board = service.dump_board(group)
+    place_id = place_id or -1  # we don't have place_id for --group case
+    write_dump(out, BoardWithPlaceId(place_id=place_id, board=board))
     return True
 
 
@@ -102,7 +60,7 @@ def process_many(service: VKBoardService, csv_path: Path, outdir: Path) -> None:
     for t in tqdm(tasks):
         out = outdir / f"place_{t.place_id}.json"
         try:
-            if process_one(service, t.url, out):
+            if process_one(service, t.url, out, t.place_id):
                 ok += 1
             else:
                 skipped += 1
@@ -128,12 +86,12 @@ def main() -> None:
         raise ValueError("Got empty token")
 
     client = VKClient(token)
-    service = VKBoardService(client, fields=DEFAULT_GROUP_FIELDS)
+    service = VKBoardService(client)
 
     if args.group:
         out = Path(args.out) if args.out else DEFAULT_OUT
         try:
-            ok = process_one(service, args.group, out)
+            ok = process_one(service, url=args.group, out=out)
         except Exception as e:
             raise SystemExit(f"Error: {e}") from e
         if not ok:

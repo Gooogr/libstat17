@@ -40,4 +40,4 @@ TOPIC_LABELING_PROMPT = """
   ...
 ]
 
-"""
+""".strip()
