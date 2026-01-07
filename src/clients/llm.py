@@ -6,6 +6,9 @@ from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
+# TODO: pass key and url
+
+#
 class LLMClient:
     def __init__(self, model_name: str, temperature: float, system_prompt: str):
         self.model_name = model_name

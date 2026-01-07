@@ -35,9 +35,10 @@ TOPIC_LABELING_PROMPT = """
 ]
 
 ВЫХОД: плоский JSON-массив, один объект на одну тему, для каждого place_id учтены все topic_id
-[
-  {"place_id":"1","topic_id":123,"topic_type":"book_wish","confidence":1.0},
-  ...
-]
+{
+  "rows": [
+    {"place_id":1,"topic_id":123,"topic_type":"book_wish","confidence":0.95}
+  ]
+}
 
 """.strip()
