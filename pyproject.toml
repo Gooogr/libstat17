@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv (>=1.2.1,<2.0.0)",
     "snakemake (>=9.14.5,<10.0.0)",
     "tqdm (>=4.67.1,<5.0.0)",
+    "litellm (>=1.80.11,<2.0.0)",
 ]
 
 [tool.poetry]

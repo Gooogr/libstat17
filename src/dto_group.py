@@ -21,3 +21,8 @@ class Topic(BaseModel):
 class Board(BaseModel):
     group: Group
     topics: list[Topic] = Field(default_factory=list)
+
+
+class BoardWithPlaceId(BaseModel):
+    place_id: int  # match with map_points.csv
+    board: Board
