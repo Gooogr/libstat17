@@ -10,5 +10,5 @@ Set API keys for your LLM provider in `.env` file. More details [here](https://d
 ## Run pipeline
 `snakemake --cores 1`
 
-TODO - add these steps to pipeline as well
-- LLM labeling for topics:<br> `python ./scripts/label_topics.py --in-dir ./data/external/groups/ --out-csv ./data/interim/topic_labels.csv`
+LLM-based steps $$$:
+- LLM labeling for topics:<br> `python ./scripts/label_topics.py --out-csv ./data/processed/topic_labels.csv`

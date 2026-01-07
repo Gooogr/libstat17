@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.clients.llm import LLMClient
-from src.dto_group import BoardWithPlaceId
 from src.prompts.topic_labeling import TOPIC_LABELING_PROMPT
 
 load_dotenv()
@@ -17,11 +16,14 @@ load_dotenv()
 MODEL_NAME = "openai/gpt-5-mini"
 TEMPERATURE = 0.0
 
+# Safety to reduce prompt bloat from extremely long first messages
+MAX_FIRST_MESSAGE_CHARS = 1200
+
 
 # --- Input payload model --- #
 class TopicsPayload(BaseModel):
     place_id: int
-    topics: list[dict[str, Any]]
+    topics: list[dict[str, Any]]  # each dict has: topic_id, topic_title, first_message
 
 
 # --- Output response model --- #
@@ -41,29 +43,7 @@ class TopicLabelingResponse(BaseModel):
     rows: list[TopicLabelRow]
 
 
-def _parse_board_file(path: Path) -> BoardWithPlaceId:
-    return BoardWithPlaceId.model_validate_json(path.read_text(encoding="utf-8"))
-
-
-def _board_to_payload(board: BoardWithPlaceId) -> TopicsPayload:
-    topics = [
-        {"topic_id": int(t.topic_id), "topic_title": (t.title or "").strip()}
-        for t in board.board.topics
-    ]
-    return TopicsPayload(place_id=board.place_id, topics=topics)
-
-
-def load_payload(path: Path) -> TopicsPayload:
-    board = _parse_board_file(path)
-    return _board_to_payload(board)
-
-
-def get_sorted_json_files(directory: Path) -> list[Path]:
-    return sorted(directory.glob("*.json"))
-
-
-def chunk_places(places: list[TopicsPayload], max_places: int = 25):
-    """Yield successive max_places-sized chunks from places."""
+def batch_payload(places: list[TopicsPayload], max_places: int = 25):
     it = iter(places)
     chunk = list(islice(it, max_places))
     while chunk:
@@ -71,27 +51,78 @@ def chunk_places(places: list[TopicsPayload], max_places: int = 25):
         chunk = list(islice(it, max_places))
 
 
-def validate_directory(path: Path) -> None:
-    if not path.exists():
-        raise FileNotFoundError(f"Directory does not exist: {path}")
-    if not path.is_dir():
-        raise NotADirectoryError(f"Not a directory: {path}")
+
+
+def load_topics_with_first_message(topics_csv: Path, messages_csv: Path) -> pd.DataFrame:
+    topics_df = pd.read_csv(topics_csv)
+    messages_df = pd.read_csv(messages_csv)
+
+    topics_df["topic_title"] = topics_df["topic_title"].fillna("").astype(str).str.strip()
+
+    # Get first message per (place_id, topic_id) by smallest message_idx
+    first_df = (
+        messages_df.sort_values(["place_id", "topic_id", "message_idx"])
+        .groupby(["place_id", "topic_id"], as_index=False)
+        .first()[["place_id", "topic_id", "message_text"]]
+        .rename(columns={"message_text": "first_message"})
+    )
+    first_df["first_message"] = first_df["first_message"].fillna("").astype(str)
+
+    # Left join so topics without messages still exist
+    out = topics_df.merge(first_df, on=["place_id", "topic_id"], how="left")
+    out["first_message"] = out["first_message"].fillna("")
+
+    # Truncate for payload safety (keeps behavior stable; avoids context blowups)
+    out["first_message"] = out["first_message"].map(lambda s: s[:MAX_FIRST_MESSAGE_CHARS])
+
+    # Stable ordering
+    out = out.sort_values(["place_id", "topic_id"]).reset_index(drop=True)
+    return out
+
+
+def build_place_payloads(df: pd.DataFrame) -> list[TopicsPayload]:
+    places: list[TopicsPayload] = []
+
+    df = df.dropna(subset=["place_id", "topic_id"]).copy()
+    df["place_id"] = df["place_id"].astype(int)
+    df["topic_id"] = df["topic_id"].astype(int)
+
+    for place_id, g in df.groupby("place_id", sort=True):
+        g = g.sort_values("topic_id")
+        topics = [
+            {
+                "topic_id": int(r.topic_id),
+                "topic_title": str(r.topic_title),
+                "first_message": str(r.first_message),
+            }
+            for r in g.itertuples(index=False)
+        ]
+        places.append(TopicsPayload(place_id=int(place_id), topics=topics))
+
+    places.sort(key=lambda p: p.place_id)
+    return places
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in-dir", required=True)
+    ap.add_argument("--topics-csv", default="data/interim/topics.csv")
+    ap.add_argument("--messages-csv", default="data/interim/messages.csv")
     ap.add_argument("--out-csv", required=True)
     ap.add_argument("--max-places", type=int, default=25)
     args = ap.parse_args()
 
-    in_dir = Path(args.in_dir)
-    validate_directory(in_dir)
+    topics_csv = Path(args.topics_csv)
+    messages_csv = Path(args.messages_csv)
+
+    if not topics_csv.exists():
+        raise FileNotFoundError(f"topics.csv not found: {topics_csv}")
+    if not messages_csv.exists():
+        raise FileNotFoundError(f"messages.csv not found: {messages_csv}")
 
     out_csv = Path(args.out_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    litellm.drop_params = True
+    litellm.drop_params = True  # openai APIs could skip temperature
 
     client = LLMClient(
         model_name=MODEL_NAME,
@@ -99,15 +130,16 @@ def main() -> None:
         system_prompt=TOPIC_LABELING_PROMPT,
     )
 
-    files = get_sorted_json_files(in_dir)
-    if not files:
-        raise SystemExit(f"No .json files found in: {in_dir}")
+    enriched = load_topics_with_first_message(topics_csv, messages_csv)
+    if enriched.empty:
+        raise SystemExit("No topics to label (topics.csv is empty after loading).")
 
-    places = [load_payload(fp) for fp in files]
-    places.sort(key=lambda p: p.place_id)
+    places = build_place_payloads(enriched)
+    if not places:
+        raise SystemExit("No places to label (no valid place_id/topic_id rows).")
 
     all_rows: list[TopicLabelRow] = []
-    batches = list(chunk_places(places, max_places=args.max_places))
+    batches = list(batch_payload(places, max_places=args.max_places))
 
     for i, batch in enumerate(batches, start=1):
         total_topics = sum(len(p.topics) for p in batch)
@@ -121,7 +153,6 @@ def main() -> None:
         all_rows.extend(resp.rows)
 
     df = pd.DataFrame([row.model_dump() for row in all_rows])
-
     if not df.empty:
         df = df.sort_values(["place_id", "topic_id"])
 
