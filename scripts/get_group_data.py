@@ -1,8 +1,7 @@
 import argparse
-import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -10,99 +9,93 @@ from tqdm import tqdm
 
 from src.clients.vk import VKClient
 from src.dto_group import BoardWithPlaceId
-from src.services.board import VKBoardService  # type: ignore[import-untyped]
+from src.services.board import VKBoardService
 
 load_dotenv()
 
-DEFAULT_OUT = Path("data/external/group_data.json")  # for --group
-DEFAULT_OUTDIR = Path("data/external/groups")  # for --csv
+DEFAULT_SINGLE_OUTPUT = Path("data/external/group_data.json")
+DEFAULT_BATCH_OUTPUT_DIR = Path("data/external/groups")
 
 
-@dataclass(frozen=True)
-class Task:
+class GroupTask(NamedTuple):
     place_id: int
     url: str
 
 
-def read_tasks(csv_path: Path) -> list[Task]:
-    df = pd.read_csv(
-        csv_path, usecols=["number", "link"], dtype={"number": int, "link": str}
-    )
-    return [Task(place_id=id, url=url) for id, url in zip(df.number, df.link)]
+def load_tasks(csv_path: Path) -> list[GroupTask]:
+    df = pd.read_csv(csv_path, usecols=["number", "link"])
+    return [GroupTask(row.number, row.link) for _, row in df.iterrows()]
 
 
-def write_dump(path: Path, dump: BoardWithPlaceId) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(dump.model_dump(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def process_one(
-    service: VKBoardService, url: str, out: Path, place_id: int | None = None
-) -> bool:
+def fetch_board(
+    service: VKBoardService, url: str, place_id: int = -1
+) -> BoardWithPlaceId | None:
     group = service.get_group(url)
     if not group:
-        return False
+        return None
     board = service.dump_board(group)
-    place_id = place_id or -1  # we don't have place_id for --group case
-    write_dump(out, BoardWithPlaceId(place_id=place_id, board=board))
-    return True
+    return BoardWithPlaceId(place_id=place_id, board=board)
 
 
-def process_many(service: VKBoardService, csv_path: Path, outdir: Path) -> None:
-    tasks = read_tasks(csv_path)
+def save_board(board: BoardWithPlaceId, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        board.model_dump_json(indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
-    ok = 0
-    skipped = 0
 
-    for t in tqdm(tasks):
-        out = outdir / f"place_{t.place_id}.json"
-        try:
-            if process_one(service, t.url, out, t.place_id):
-                ok += 1
-            else:
-                skipped += 1
-        except Exception:
-            skipped += 1
+def process_batch(
+    service: VKBoardService, tasks: list[GroupTask], output_dir: Path
+) -> tuple[int, int]:
+    success_count = 0
+    failure_count = 0
 
-    print(f"saved={ok} skipped={skipped} outdir={outdir}")
+    for task in tqdm(tasks):
+        output_path = output_dir / f"place_{task.place_id}.json"
+        board = fetch_board(service, task.url, task.place_id)
+        if board:
+            save_board(board, output_path)
+            success_count += 1
+        else:
+            failure_count += 1
+
+    return success_count, failure_count
+
+
+def get_auth_token(token_arg: str | None) -> str:
+    token = (token_arg or os.getenv("VK_TOKEN") or "").strip()
+    if not token:
+        raise ValueError("VK API token is required")
+    return token
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    src = ap.add_mutually_exclusive_group(required=True)
-    src.add_argument("--group")
-    src.add_argument("--csv")
+    parser = argparse.ArgumentParser()
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument("--group", help="Process single group by URL")
+    mode_group.add_argument("--csv", help="Process multiple groups from CSV")
 
-    ap.add_argument("--out")
-    ap.add_argument("--outdir")
-    ap.add_argument("--token", default=None)
-    args = ap.parse_args()
+    parser.add_argument("--out", help="Output file for single group")
+    parser.add_argument("--outdir", help="Output directory for batch processing")
+    parser.add_argument("--token", help="VK API token (or use VK_TOKEN env var)")
 
-    token = (args.token or os.getenv("VK_TOKEN") or "").strip()
-    if not token:
-        raise ValueError("Got empty token")
-
-    client = VKClient(token)
-    service = VKBoardService(client)
+    args = parser.parse_args()
+    token = get_auth_token(args.token)
+    service = VKBoardService(VKClient(token))
 
     if args.group:
-        out = Path(args.out) if args.out else DEFAULT_OUT
-        try:
-            ok = process_one(service, url=args.group, out=out)
-        except Exception as e:
-            raise SystemExit(f"Error: {e}") from e
-        if not ok:
-            print("Failed to find group, exit")
-            return
-        print(f"saved={out}")
-        return
-
-    csv_path = Path(args.csv)
-    outdir = Path(args.outdir) if args.outdir else DEFAULT_OUTDIR
-    process_many(service, csv_path, outdir)
+        output_path = Path(args.out) if args.out else DEFAULT_SINGLE_OUTPUT
+        board = fetch_board(service, args.group)
+        if board:
+            save_board(board, output_path)
+            print(f"Saved group data to: {output_path}")
+        else:
+            print("Failed to fetch group data")
+    else:
+        output_dir = Path(args.outdir) if args.outdir else DEFAULT_BATCH_OUTPUT_DIR
+        tasks = load_tasks(Path(args.csv))
+        success, failure = process_batch(service, tasks, output_dir)
+        print(f"Processed {len(tasks)} groups: {success} successful, {failure} failed")
 
 
 if __name__ == "__main__":
