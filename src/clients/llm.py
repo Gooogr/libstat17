@@ -1,9 +1,10 @@
 import json
-from typing import Any
+from typing import Any, TypeVar
 
 from litellm import completion
 from pydantic import BaseModel
 
+T = TypeVar("T", bound=BaseModel)
 
 class LLMClient:
     def __init__(self, model_name: str, temperature: float, system_prompt: str):
@@ -26,7 +27,7 @@ class LLMClient:
 
     def structured_call(
         self,
-        response_format: type[BaseModel],
+        response_format: type[T],
         payload: Any,
         user_prefix: str | None = None,
     ):
@@ -41,4 +42,4 @@ class LLMClient:
         )
         content = (resp.choices[0].message.content or "").strip()  # type: ignore
         json_data = json.loads(content)
-        return response_format.model_validate_json(json_data)
+        return response_format.model_validate(json_data)
