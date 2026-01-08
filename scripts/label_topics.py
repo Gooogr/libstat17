@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.clients.llm import LLMClient
 from src.prompts.topic_labeling import TOPIC_LABELING_PROMPT
+from src.utils import remove_emojis
 
 load_dotenv()
 
@@ -17,7 +18,7 @@ MODEL_NAME = "openai/gpt-5-mini"
 TEMPERATURE = 0.0
 
 # Safety to reduce prompt bloat from extremely long first messages
-MAX_FIRST_MESSAGE_CHARS = 1200
+MAX_FIRST_MESSAGE_CHARS = 200
 
 
 # --- Input payload model --- #
@@ -53,10 +54,7 @@ def batch_payload(places: list[TopicsPayload], max_places: int = 25):
 
 
 
-def load_topics_with_first_message(topics_csv: Path, messages_csv: Path) -> pd.DataFrame:
-    topics_df = pd.read_csv(topics_csv)
-    messages_df = pd.read_csv(messages_csv)
-
+def load_topics_with_first_message(topics_df: pd.DataFrame, messages_df: pd.DataFrame) -> pd.DataFrame:
     topics_df["topic_title"] = topics_df["topic_title"].fillna("").astype(str).str.strip()
 
     # Get first message per (place_id, topic_id) by smallest message_idx
@@ -66,7 +64,7 @@ def load_topics_with_first_message(topics_csv: Path, messages_csv: Path) -> pd.D
         .first()[["place_id", "topic_id", "message_text"]]
         .rename(columns={"message_text": "first_message"})
     )
-    first_df["first_message"] = first_df["first_message"].fillna("").astype(str)
+    first_df["first_message"] = first_df["first_message"].fillna("").astype(str).apply(remove_emojis)
 
     # Left join so topics without messages still exist
     out = topics_df.merge(first_df, on=["place_id", "topic_id"], how="left")
@@ -107,13 +105,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--topics-csv", default="data/interim/topics.csv")
     ap.add_argument("--messages-csv", default="data/interim/messages.csv")
-    ap.add_argument("--out-csv", required=True)
+    ap.add_argument("--out-csv", default="data/processed/topics_with_labels.csv")
     ap.add_argument("--max-places", type=int, default=25)
     args = ap.parse_args()
 
     topics_csv = Path(args.topics_csv)
     messages_csv = Path(args.messages_csv)
-
+    
     if not topics_csv.exists():
         raise FileNotFoundError(f"topics.csv not found: {topics_csv}")
     if not messages_csv.exists():
@@ -129,12 +127,14 @@ def main() -> None:
         temperature=TEMPERATURE,
         system_prompt=TOPIC_LABELING_PROMPT,
     )
+    topics_df = pd.read_csv(topics_csv)
+    messages_df = pd.read_csv(messages_csv)
 
-    enriched = load_topics_with_first_message(topics_csv, messages_csv)
-    if enriched.empty:
+    enriched_df = load_topics_with_first_message(topics_df, messages_df)
+    if enriched_df.empty:
         raise SystemExit("No topics to label (topics.csv is empty after loading).")
 
-    places = build_place_payloads(enriched)
+    places = build_place_payloads(enriched_df)
     if not places:
         raise SystemExit("No places to label (no valid place_id/topic_id rows).")
 
@@ -152,12 +152,14 @@ def main() -> None:
         )
         all_rows.extend(resp.rows)
 
-    df = pd.DataFrame([row.model_dump() for row in all_rows])
-    if not df.empty:
-        df = df.sort_values(["place_id", "topic_id"])
+    topic_labels_df = pd.DataFrame([row.model_dump() for row in all_rows])
+    if not topic_labels_df.empty:
+        topic_labels_df = topic_labels_df.sort_values(["place_id", "topic_id"])
+        
+    df_out = topics_df.merge(topic_labels_df, on=["place_id", "topic_id"], how="left")
 
-    df.to_csv(out_csv, index=False)
-    print(f"Wrote {len(df)} rows -> {out_csv}")
+    df_out.to_csv(out_csv, index=False)
+    print(f"Wrote {len(df_out)} rows -> {out_csv}")
 
 
 if __name__ == "__main__":
