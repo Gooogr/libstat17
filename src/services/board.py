@@ -1,5 +1,5 @@
 from src.clients.vk import VKClient  # type: ignore[import-untyped]
-from src.dto_group import Board, Group, Topic
+from src.dto.dto_group import Board, Group, Topic
 
 DEFAULT_GROUP_FIELDS = "screen_name,name,is_closed,description,members_count"
 

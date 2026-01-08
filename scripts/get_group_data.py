@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from src.clients.vk import VKClient
-from src.dto_group import BoardWithPlaceId
+from src.dto.dto_group import BoardWithPlaceId
 from src.services.board import VKBoardService
 
 load_dotenv()

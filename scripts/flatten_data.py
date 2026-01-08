@@ -6,7 +6,7 @@ from typing import Any, NamedTuple, Optional
 
 import pandas as pd
 
-from src.dto_group import BoardWithPlaceId
+from src.dto.dto_group import BoardWithPlaceId
 
 
 logger = logging.getLogger(__name__)
