@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 LAT_COL = "lat"
 LON_COL = "lon"
 GEOPOINT_COL = "geopoint"
@@ -16,19 +15,12 @@ def _ensure_exists(path: Path) -> None:
 
 
 def _build_geopoint(lat_series: pd.Series, lon_series: pd.Series) -> pd.Series:
-    # DataLens-friendly geopoint as JSON list string: "[lat,lon]" (lat first)
+    # geopoint as JSON list string: "[lat,lon]" (lat first)
     lat = (
-        lat_series.fillna("")
-        .astype(str)
-        .str.strip()
-        .str.replace(",", ".", regex=False)
+        lat_series.fillna("").astype(str).str.strip().str.replace(",", ".", regex=False)
     )
     lon = (
-        lon_series.fillna("")
-        .astype(str)
-        .str.strip()
-        .str.replace(",", ".", regex=False)
-        .replace({"nan": "", "None": "", "": ""})
+        lon_series.fillna("").astype(str).str.strip().str.replace(",", ".", regex=False)
     )
 
     lat_num = pd.to_numeric(lat, errors="coerce")
@@ -79,6 +71,7 @@ def main() -> None:
     nonbooks_out = out_dir / "wishes_nonbook.csv"
     shutil.copy2(wishes_books_in, books_out)
     shutil.copy2(wishes_nonbooks_in, nonbooks_out)
+
 
 if __name__ == "__main__":
     main()
