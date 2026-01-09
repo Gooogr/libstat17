@@ -1,3 +1,5 @@
+# flake8: noqa
+
 BOOK_WISH_EXTRACTION_PROMPT = """
 ТЫ — ИЗВЛЕКАТЕЛЬ ЗАПРОСОВ КНИГ ИЗ ТЕКСТОВ ТЕМ VK.
 
