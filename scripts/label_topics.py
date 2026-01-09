@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 from itertools import islice
 from pathlib import Path
 from typing import Any, Literal
@@ -7,9 +8,11 @@ import litellm
 import pandas as pd
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
+from tqdm import tqdm
 
 from src.clients.llm import LLMClient
 from src.prompts.topic_labeling import TOPIC_LABELING_PROMPT
+from src.utils import remove_emojis
 
 load_dotenv()
 
@@ -17,7 +20,7 @@ MODEL_NAME = "openai/gpt-5-mini"
 TEMPERATURE = 0.0
 
 # Safety to reduce prompt bloat from extremely long first messages
-MAX_FIRST_MESSAGE_CHARS = 1200
+MAX_FIRST_MESSAGE_CHARS = 200
 
 
 # --- Input payload model --- #
@@ -51,13 +54,12 @@ def batch_payload(places: list[TopicsPayload], max_places: int = 25):
         chunk = list(islice(it, max_places))
 
 
-
-
-def load_topics_with_first_message(topics_csv: Path, messages_csv: Path) -> pd.DataFrame:
-    topics_df = pd.read_csv(topics_csv)
-    messages_df = pd.read_csv(messages_csv)
-
-    topics_df["topic_title"] = topics_df["topic_title"].fillna("").astype(str).str.strip()
+def load_topics_with_first_message(
+    topics_df: pd.DataFrame, messages_df: pd.DataFrame
+) -> pd.DataFrame:
+    topics_df["topic_title"] = (
+        topics_df["topic_title"].fillna("").astype(str).str.strip()
+    )
 
     # Get first message per (place_id, topic_id) by smallest message_idx
     first_df = (
@@ -66,14 +68,18 @@ def load_topics_with_first_message(topics_csv: Path, messages_csv: Path) -> pd.D
         .first()[["place_id", "topic_id", "message_text"]]
         .rename(columns={"message_text": "first_message"})
     )
-    first_df["first_message"] = first_df["first_message"].fillna("").astype(str)
+    first_df["first_message"] = (
+        first_df["first_message"].fillna("").astype(str).apply(remove_emojis)
+    )
 
     # Left join so topics without messages still exist
     out = topics_df.merge(first_df, on=["place_id", "topic_id"], how="left")
     out["first_message"] = out["first_message"].fillna("")
 
     # Truncate for payload safety (keeps behavior stable; avoids context blowups)
-    out["first_message"] = out["first_message"].map(lambda s: s[:MAX_FIRST_MESSAGE_CHARS])
+    out["first_message"] = out["first_message"].map(
+        lambda s: s[:MAX_FIRST_MESSAGE_CHARS]
+    )
 
     # Stable ordering
     out = out.sort_values(["place_id", "topic_id"]).reset_index(drop=True)
@@ -103,12 +109,15 @@ def build_place_payloads(df: pd.DataFrame) -> list[TopicsPayload]:
     return places
 
 
-def main() -> None:
+async def main_async() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--topics-csv", default="data/interim/topics.csv")
     ap.add_argument("--messages-csv", default="data/interim/messages.csv")
-    ap.add_argument("--out-csv", required=True)
+    ap.add_argument("--out-csv", default="data/processed/topics_with_labels.csv")
     ap.add_argument("--max-places", type=int, default=25)
+    ap.add_argument("--max-concurrency", type=int, default=20)
+    ap.add_argument("--n-retries", type=int, default=2)
+    ap.add_argument("--retry-delay-s", type=float, default=1.0)
     args = ap.parse_args()
 
     topics_csv = Path(args.topics_csv)
@@ -128,36 +137,55 @@ def main() -> None:
         model_name=MODEL_NAME,
         temperature=TEMPERATURE,
         system_prompt=TOPIC_LABELING_PROMPT,
+        max_concurrency=args.max_concurrency,
+        n_retries=args.n_retries,
+        retry_delay_s=args.retry_delay_s,
     )
+    topics_df = pd.read_csv(topics_csv)
+    messages_df = pd.read_csv(messages_csv)
 
-    enriched = load_topics_with_first_message(topics_csv, messages_csv)
-    if enriched.empty:
+    enriched_df = load_topics_with_first_message(topics_df, messages_df)
+    if enriched_df.empty:
         raise SystemExit("No topics to label (topics.csv is empty after loading).")
 
-    places = build_place_payloads(enriched)
+    places = build_place_payloads(enriched_df)
     if not places:
         raise SystemExit("No places to label (no valid place_id/topic_id rows).")
 
     all_rows: list[TopicLabelRow] = []
     batches = list(batch_payload(places, max_places=args.max_places))
 
+    tasks: list[asyncio.Task[TopicLabelingResponse]] = []
     for i, batch in enumerate(batches, start=1):
         total_topics = sum(len(p.topics) for p in batch)
         print(f"[batch {i}/{len(batches)}] places={len(batch)} topics={total_topics}")
 
-        resp = client.structured_call(
-            response_format=TopicLabelingResponse,
-            payload=[b.model_dump() for b in batch],
-            user_prefix="ВХОД:\n",
+        tasks.append(
+            asyncio.create_task(
+                client.structured_call_async(
+                    response_format=TopicLabelingResponse,
+                    payload=[b.model_dump() for b in batch],
+                    user_prefix="ВХОД:\n",
+                )
+            )
         )
+
+    for fut in tqdm(asyncio.as_completed(tasks), total=len(tasks)):
+        resp = await fut
         all_rows.extend(resp.rows)
 
-    df = pd.DataFrame([row.model_dump() for row in all_rows])
-    if not df.empty:
-        df = df.sort_values(["place_id", "topic_id"])
+    topic_labels_df = pd.DataFrame([row.model_dump() for row in all_rows])
+    if not topic_labels_df.empty:
+        topic_labels_df = topic_labels_df.sort_values(["place_id", "topic_id"])
 
-    df.to_csv(out_csv, index=False)
-    print(f"Wrote {len(df)} rows -> {out_csv}")
+    df_out = topics_df.merge(topic_labels_df, on=["place_id", "topic_id"], how="left")
+
+    df_out.to_csv(out_csv, index=False)
+    print(f"Wrote {len(df_out)} rows -> {out_csv}")
+
+
+def main() -> None:
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":

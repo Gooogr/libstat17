@@ -18,7 +18,7 @@ class Point(BaseModel):
     link: str | None
 
 
-MAP_URL = "https://yandex.ru/maps/?l=mrc&ll=53.493467%2C65.320153&mode=usermaps&source=constructorLink&um=constructor%3Abd8db10fcecef60526f6343abd593ecd7f841eff949a8362c457bd23497aa933&z=12.6"
+MAP_URL = "https://yandex.ru/maps/?l=mrc&ll=53.493467%2C65.320153&mode=usermaps&source=constructorLink&um=constructor%3Abd8db10fcecef60526f6343abd593ecd7f841eff949a8362c457bd23497aa933&z=12.6"  # noqa: E501
 EMPTY_POINT_NAME = "пустой номер"
 DEFAULT_SAVING_PATH = "data/external/geo_points.csv"
 
