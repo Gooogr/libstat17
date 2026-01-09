@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 from itertools import islice
 from pathlib import Path
 from typing import Any, Literal
@@ -7,6 +8,7 @@ import litellm
 import pandas as pd
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
+from tqdm import tqdm
 
 from src.clients.llm import LLMClient
 from src.prompts.topic_labeling import TOPIC_LABELING_PROMPT
@@ -107,12 +109,15 @@ def build_place_payloads(df: pd.DataFrame) -> list[TopicsPayload]:
     return places
 
 
-def main() -> None:
+async def main_async() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--topics-csv", default="data/interim/topics.csv")
     ap.add_argument("--messages-csv", default="data/interim/messages.csv")
     ap.add_argument("--out-csv", default="data/processed/topics_with_labels.csv")
     ap.add_argument("--max-places", type=int, default=25)
+    ap.add_argument("--max-concurrency", type=int, default=20)
+    ap.add_argument("--n-retries", type=int, default=2)
+    ap.add_argument("--retry-delay-s", type=float, default=1.0)
     args = ap.parse_args()
 
     topics_csv = Path(args.topics_csv)
@@ -132,6 +137,9 @@ def main() -> None:
         model_name=MODEL_NAME,
         temperature=TEMPERATURE,
         system_prompt=TOPIC_LABELING_PROMPT,
+        max_concurrency=args.max_concurrency,
+        n_retries=args.n_retries,
+        retry_delay_s=args.retry_delay_s,
     )
     topics_df = pd.read_csv(topics_csv)
     messages_df = pd.read_csv(messages_csv)
@@ -147,15 +155,23 @@ def main() -> None:
     all_rows: list[TopicLabelRow] = []
     batches = list(batch_payload(places, max_places=args.max_places))
 
+    tasks: list[asyncio.Task[TopicLabelingResponse]] = []
     for i, batch in enumerate(batches, start=1):
         total_topics = sum(len(p.topics) for p in batch)
         print(f"[batch {i}/{len(batches)}] places={len(batch)} topics={total_topics}")
 
-        resp = client.structured_call(
-            response_format=TopicLabelingResponse,
-            payload=[b.model_dump() for b in batch],
-            user_prefix="ВХОД:\n",
+        tasks.append(
+            asyncio.create_task(
+                client.structured_call_async(
+                    response_format=TopicLabelingResponse,
+                    payload=[b.model_dump() for b in batch],
+                    user_prefix="ВХОД:\n",
+                )
+            )
         )
+
+    for fut in tqdm(asyncio.as_completed(tasks), total=len(tasks)):
+        resp = await fut
         all_rows.extend(resp.rows)
 
     topic_labels_df = pd.DataFrame([row.model_dump() for row in all_rows])
@@ -166,6 +182,10 @@ def main() -> None:
 
     df_out.to_csv(out_csv, index=False)
     print(f"Wrote {len(df_out)} rows -> {out_csv}")
+
+
+def main() -> None:
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":
