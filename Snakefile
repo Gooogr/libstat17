@@ -10,15 +10,22 @@ MESSAGES_CSV = f"{INTERIM_DIR}/messages.csv"
 
 PROCESSED_DIR = "data/processed"
 TOPIC_LABELS_CSV = f"{PROCESSED_DIR}/topic_labels.csv"
-BOOK_WISHES_CSV = f"{PROCESSED_DIR}/book_wishes.csv"
+BOOK_WISHES_CSV = f"{PROCESSED_DIR}/wishes_books.csv"
 NONBOOK_WISHES_CSV = f"{PROCESSED_DIR}/nonbook_wishes.csv"
+PLACE_METRICS_CSV = f"{PROCESSED_DIR}/place_metrics.csv"
+
+DATALENS_DIR = "data/datalens"
+PLACES_DL_CSV=f"{DATALENS_DIR}/places.csv",
+WISHES_BOOK_DL_CSV=f"{DATALENS_DIR}/wishes_book.csv",
+WISHES_NONBOOK_DL_CSV=f"{DATALENS_DIR}/wishes_nonbook.csv"
 
 
 rule all:
     input:
         TOPIC_LABELS_CSV,
         BOOK_WISHES_CSV,
-        NONBOOK_WISHES_CSV
+        NONBOOK_WISHES_CSV,
+        DL_PLACES_CSV,
 
 
 rule map_points:
@@ -97,3 +104,19 @@ rule nonbook_wishes:
         "--topics-csv {input.topics} "
         "--messages-csv {input.messages} "
         "--out-csv {output}"
+
+
+rule datalens:
+    input:
+        place_metrics=PLACE_METRICS_CSV,
+        wishes_books=BOOK_WISHES_CSV,
+        wishes_nonbooks=NONBOOK_WISHES_CSV
+    output:
+        places=PLACES_DL_CSV,
+        wishes_book=WISHES_BOOK_DL_CSV,
+        wishes_nonbook=WISHES_NONBOOK_DL_CSV
+    shell:
+        "mkdir -p {DATALENS_DIR} && "
+        "python scripts/prepare_for_datalens.py "
+        "--input-dir {PROCESSED_DIR} "
+        "--out-dir {DATALENS_DIR}"
