@@ -10,8 +10,8 @@ from loguru import logger
 from tqdm import tqdm
 
 from src.clients.llm import LLMClient
-from src.dto.dto_wishes import BookWishExtractionResponse, TopicTextPayload
-from src.prompts.extract_books_wishes import BOOK_WISH_EXTRACTION_PROMPT
+from src.dto.dto_wishes import NonbookWishExtractionResponse, TopicTextPayload
+from src.prompts.extract_nonbooks_wishes import NONBOOK_WISHES_PROMPT
 from src.utils import remove_emojis
 
 load_dotenv()
@@ -20,20 +20,30 @@ MODEL_NAME = "openai/gpt-5-mini"
 TEMPERATURE = 0.0
 SEPARATOR = "\n\n---\n\n"
 
+ALLOWED_CATEGORIES = {
+    "furniture",
+    "tech_equipment",
+    "supplies",
+    "nonbook_activities",
+    "facility_care",
+    "event_decor",
+    "other",
+}
 
-def filter_book_wish_messages(
+
+def filter_nonbook_wish_messages(
     topics_df: pd.DataFrame, messages_df: pd.DataFrame
 ) -> list[TopicTextPayload]:
-    """Extract and format messages from book_wish topics."""
-    book_topics = topics_df[topics_df["topic_type"] == "book_wish"]
-    if book_topics.empty:
+    """Extract and format messages from nonbook_wish topics."""
+    nonbook_topics = topics_df[topics_df["topic_type"] == "nonbook_wish"]
+    if nonbook_topics.empty:
         return []
 
     messages_df["message_text"] = messages_df["message_text"].fillna("").apply(remove_emojis)
 
     relevant_messages_df = pd.merge(
         messages_df,
-        book_topics[["place_id", "group_id", "topic_id", "topic_title"]],
+        nonbook_topics[["place_id", "group_id", "topic_id", "topic_title"]],
         on=["place_id", "group_id", "topic_id"],
     )
 
@@ -95,33 +105,40 @@ def prepare_batch_payload(batch: list[TopicTextPayload]) -> list[dict]:
 
 
 def clean_and_deduplicate_results(results: list) -> pd.DataFrame:
-    """Clean, filter, and deduplicate extracted book wishes."""
+    """Clean, filter, and deduplicate extracted nonbook wishes."""
     if not results:
         return pd.DataFrame()
 
     df = pd.DataFrame([r.model_dump() for r in results])
 
-    df["author"] = df["author"].fillna("").str.strip()
-    df["book_title"] = df["book_title"].fillna("").str.strip()
+    df["object_name"] = df["object_name"].fillna("").astype(str).str.strip()
+    df["category"] = df["category"].fillna("").astype(str).str.strip()
+    df["object_url"] = df["object_url"].fillna("").astype(str).str.strip()
     df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce").fillna(0.0)
 
-    df = df[df["book_title"] != ""]
+    # basic filters
+    df = df[df["object_name"] != ""]
+    df = df[df["confidence"] >= 0.6]
+    df = df[df["category"].isin(ALLOWED_CATEGORIES)]
+
     if df.empty:
         return df
 
     df = df.groupby(
-        ["place_id", "group_id", "topic_id", "author", "book_title"],
+        ["place_id", "group_id", "topic_id", "object_name", "category", "object_url"],
         as_index=False,
     )["confidence"].max()
 
     return df.sort_values(
-        ["place_id", "group_id", "topic_id", "author", "book_title"]
-    )[["place_id", "group_id", "topic_id", "author", "book_title", "confidence"]]
+        ["place_id", "group_id", "topic_id", "category", "object_name", "object_url"]
+    )[
+        ["place_id", "group_id", "topic_id", "object_name", "category", "object_url", "confidence"]
+    ]
 
 
 def save_empty_csv(output_path: Path) -> None:
     empty_df = pd.DataFrame(
-        columns=["place_id", "group_id", "topic_id", "author", "book_title", "confidence"]
+        columns=["place_id", "group_id", "topic_id", "object_name", "category", "object_url", "confidence"]
     )
     empty_df.to_csv(output_path, index=False)
 
@@ -148,7 +165,7 @@ async def process_batch_async(
     )
 
     response = await client.structured_call_async(
-        response_format=BookWishExtractionResponse,
+        response_format=NonbookWishExtractionResponse,
         payload=payload,
         user_prefix="ВХОД:\n",
     )
@@ -174,7 +191,7 @@ async def main_async() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--topics-with-labels-csv", default="data/processed/topics_with_labels.csv")
     parser.add_argument("--messages-csv", default="data/interim/messages.csv")
-    parser.add_argument("--out-csv", default="data/processed/wishes_books.csv")
+    parser.add_argument("--out-csv", default="data/processed/wishes_nonbook.csv")
     parser.add_argument("--max-batch-chars", type=int, default=5000)
     parser.add_argument("--max-batch-messages", type=int, default=10)
 
@@ -192,7 +209,7 @@ async def main_async() -> None:
         raise FileNotFoundError("Required input files not found")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    batch_dir_path = output_path.parent / "book_batches"
+    batch_dir_path = output_path.parent / "nonbook_batches"
     batch_dir_path.mkdir(parents=True, exist_ok=True)
 
     litellm.drop_params = True  # openai APIs could skip temperature
@@ -200,7 +217,7 @@ async def main_async() -> None:
     client = LLMClient(
         model_name=MODEL_NAME,
         temperature=TEMPERATURE,
-        system_prompt=BOOK_WISH_EXTRACTION_PROMPT,
+        system_prompt=NONBOOK_WISHES_PROMPT,
         max_concurrency=args.max_concurrency,
         n_retries=args.n_retries,
         retry_delay_s=args.retry_delay_s,
@@ -209,16 +226,16 @@ async def main_async() -> None:
     topics_df = pd.read_csv(topics_path)
     messages_df = pd.read_csv(messages_path)
 
-    book_wish_messages = filter_book_wish_messages(topics_df, messages_df)
-    if not book_wish_messages:
+    nonbook_messages = filter_nonbook_wish_messages(topics_df, messages_df)
+    if not nonbook_messages:
         save_empty_csv(output_path)
         logger.info("Wrote 0 rows -> {}", output_path)
         return
 
-    batches = list(create_batches(book_wish_messages, args.max_batch_chars, args.max_batch_messages))
+    batches = list(create_batches(nonbook_messages, args.max_batch_chars, args.max_batch_messages))
     logger.info(
         "Found {} messages, grouping into {} batches",
-        len(book_wish_messages),
+        len(nonbook_messages),
         len(batches),
     )
 
