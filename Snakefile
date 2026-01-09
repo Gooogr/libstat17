@@ -26,6 +26,7 @@ rule all:
         BOOK_WISHES_CSV,
         NONBOOK_WISHES_CSV,
         DL_PLACES_CSV,
+        PLACE_METRICS_CSV,
 
 
 rule map_points:
@@ -84,7 +85,7 @@ rule book_wishes:
     output:
         BOOK_WISHES_CSV
     shell:
-        "python scripts/extract_book_wishes.py "
+        "python scripts/extract_wishes_books.py "
         "--topic-labels-csv {input.topic_labels} "
         "--topics-csv {input.topics} "
         "--messages-csv {input.messages} "
@@ -99,7 +100,7 @@ rule nonbook_wishes:
     output:
         NONBOOK_WISHES_CSV
     shell:
-        "python scripts/extract_nonbook_wishes.py "
+        "python scripts/extract_wishes_nonbooks.py "
         "--topic-labels-csv {input.topic_labels} "
         "--topics-csv {input.topics} "
         "--messages-csv {input.messages} "
@@ -120,3 +121,14 @@ rule datalens:
         "python scripts/prepare_for_datalens.py "
         "--input-dir {PROCESSED_DIR} "
         "--out-dir {DATALENS_DIR}"
+rule place_metrics:
+    input:
+        places=PLACES_CSV
+    output:
+        PLACE_METRICS_CSV
+    shell:
+        "mkdir -p {PROCESSED_DIR} && "
+        "python scripts/extract_place_metrics.py "
+        "--places-csv {input.places} "
+        "--out-csv {output} "
+        "--max-places 25"
