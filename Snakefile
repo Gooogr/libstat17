@@ -1,4 +1,3 @@
-
 EXTERNAL_DIR = "data/external"
 VK_DATA_OUTDIR = f"{EXTERNAL_DIR}/groups"
 MAP_POINTS_CSV_PATH = f"{EXTERNAL_DIR}/map_points.csv"
@@ -11,11 +10,15 @@ MESSAGES_CSV = f"{INTERIM_DIR}/messages.csv"
 
 PROCESSED_DIR = "data/processed"
 TOPIC_LABELS_CSV = f"{PROCESSED_DIR}/topic_labels.csv"
+BOOK_WISHES_CSV = f"{PROCESSED_DIR}/book_wishes.csv"
+NONBOOK_WISHES_CSV = f"{PROCESSED_DIR}/nonbook_wishes.csv"
 
 
 rule all:
     input:
-        TOPIC_LABELS_CSV
+        TOPIC_LABELS_CSV,
+        BOOK_WISHES_CSV,
+        NONBOOK_WISHES_CSV
 
 
 rule map_points:
@@ -58,9 +61,39 @@ rule topic_labels:
     output:
         TOPIC_LABELS_CSV
     shell:
-        "mkdir -p data/processed && "
+        "mkdir -p {PROCESSED_DIR} && "
         "python scripts/topic_labeling.py "
         "--topics-csv {input.topics} "
         "--messages-csv {input.messages} "
         "--out-csv {output} "
         "--max-places 25"
+
+
+rule book_wishes:
+    input:
+        topic_labels=TOPIC_LABELS_CSV,
+        topics=TOPICS_CSV,
+        messages=MESSAGES_CSV
+    output:
+        BOOK_WISHES_CSV
+    shell:
+        "python scripts/extract_book_wishes.py "
+        "--topic-labels-csv {input.topic_labels} "
+        "--topics-csv {input.topics} "
+        "--messages-csv {input.messages} "
+        "--out-csv {output}"
+
+
+rule nonbook_wishes:
+    input:
+        topic_labels=TOPIC_LABELS_CSV,
+        topics=TOPICS_CSV,
+        messages=MESSAGES_CSV
+    output:
+        NONBOOK_WISHES_CSV
+    shell:
+        "python scripts/extract_nonbook_wishes.py "
+        "--topic-labels-csv {input.topic_labels} "
+        "--topics-csv {input.topics} "
+        "--messages-csv {input.messages} "
+        "--out-csv {output}"
