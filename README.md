@@ -59,3 +59,10 @@ python ./scripts/extract_nonbook_wishes.py --out-csv ./data/processed/wishes_non
 | `facility_care`      | Use for **cleaning, upkeep, safety, basic comfort** of the place. Not for festive decor. If it supports day-to-day maintenance/cleanliness/comfort → this tag.                                                                    | швабра/ведро, хозяйственные принадлежности, моющие средства (если просят), стремянка, инструменты для мелкого ремонта, мусорные пакеты, шторы/жалюзи, коврики, базовые вещи для уюта/обустройства, освещение/лампы (если как “для помещения”, не сценический свет)         |
 | `event_decor`        | Use for **festive / special event vibe**: decorations, props, and event visuals. If it’s mainly for **праздники/мероприятия/оформление** → this tag.                                                                              | воздушные шары, стойка/арка для шаров, гирлянды, баннеры/растяжки, фотозона/фон, тематические украшения, конфетти, реквизит для праздника, костюмы/атрибуты для выступлений (если про “праздник/сцену”)                                                                    |
 | `other`              | Use only if it **doesn’t clearly fit** any category above or is too vague/ambiguous. Prefer `other` over guessing.                                                                                                                | “нужно разное для библиотеки”, “помощь чем сможете”, редкие специфические предметы без контекста, противоречивые запросы                                                                                                                                                   |
+
+### Data stages
+
+`data/external` - raw data from vk API or yandex map parser
+`data/interim` - flatten CSV tables ready for LLM postprocessing
+`data/proceced` - tables with LLM extracted info
+`data/datalens` - BI-ready data
