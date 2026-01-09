@@ -37,8 +37,8 @@ python ./scripts/label_topics.py --out-csv ./data/processed/topic_labels.csv
 
 ### Wish extraction
 ```bash
-python ./scripts/extract_books_wishes.py --out-csv ./data/processed/wishes_books.csv
-python ./scripts/extract_nonbook_wishes.py --out-csv ./data/processed/wishes_nonbook.csv
+python ./scripts/extract_wishes_books.py --out-csv ./data/processed/wishes_books.csv
+python ./scripts/extract_wishes_nonbooks.py --out-csv ./data/processed/wishes_nonbook.csv
 ```
 
 

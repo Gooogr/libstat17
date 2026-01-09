@@ -12,13 +12,15 @@ PROCESSED_DIR = "data/processed"
 TOPIC_LABELS_CSV = f"{PROCESSED_DIR}/topic_labels.csv"
 BOOK_WISHES_CSV = f"{PROCESSED_DIR}/book_wishes.csv"
 NONBOOK_WISHES_CSV = f"{PROCESSED_DIR}/nonbook_wishes.csv"
+PLACE_METRICS_CSV = f"{PROCESSED_DIR}/place_metrics.csv"
 
 
 rule all:
     input:
         TOPIC_LABELS_CSV,
         BOOK_WISHES_CSV,
-        NONBOOK_WISHES_CSV
+        NONBOOK_WISHES_CSV,
+        PLACE_METRICS_CSV,
 
 
 rule map_points:
@@ -77,7 +79,7 @@ rule book_wishes:
     output:
         BOOK_WISHES_CSV
     shell:
-        "python scripts/extract_book_wishes.py "
+        "python scripts/extract_wishes_books.py "
         "--topic-labels-csv {input.topic_labels} "
         "--topics-csv {input.topics} "
         "--messages-csv {input.messages} "
@@ -92,8 +94,21 @@ rule nonbook_wishes:
     output:
         NONBOOK_WISHES_CSV
     shell:
-        "python scripts/extract_nonbook_wishes.py "
+        "python scripts/extract_wishes_nonbooks.py "
         "--topic-labels-csv {input.topic_labels} "
         "--topics-csv {input.topics} "
         "--messages-csv {input.messages} "
         "--out-csv {output}"
+
+
+rule place_metrics:
+    input:
+        places=PLACES_CSV
+    output:
+        PLACE_METRICS_CSV
+    shell:
+        "mkdir -p {PROCESSED_DIR} && "
+        "python scripts/extract_place_metrics.py "
+        "--places-csv {input.places} "
+        "--out-csv {output} "
+        "--max-places 25"
