@@ -43,7 +43,10 @@ class LLMClient:
         prefix = user_prefix or ""
         return [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": prefix + json.dumps(payload, ensure_ascii=False)},
+            {
+                "role": "user",
+                "content": prefix + json.dumps(payload, ensure_ascii=False),
+            },
         ]
 
     async def structured_call_async(
@@ -111,7 +114,9 @@ class LLMClient:
                     return response_format.model_construct()  # type: ignore[return-value]
 
         # Should never happen, but keep a safe fallback.
-        logger.error("Unexpected control flow in structured_call_async: {}", repr(last_err))
+        logger.error(
+            "Unexpected control flow in structured_call_async: {}", repr(last_err)
+        )
         try:
             return response_format.model_validate({"rows": []})
         except Exception:

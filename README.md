@@ -1,41 +1,54 @@
 # libstat17
 
+Data pipeline for collection libraries requests from "Страница №17".
+
 ## Setup
 
 ### Install dependencies
 ```bash
 poetry install
 ```
+
 ### Configure environment
-
 Run:
-
-`python scripts/create_vk_token.py`
+```bash
+python scripts/create_vk_token.py
+```
 
 Save the service token to `.env`.
 
 ### Configure LLM provider
+Set API keys for your LLM provider in `.env`.
 
-Set API keys for your LLM provider in `.env`. 
 More details: https://docs.litellm.ai/docs/set_keys#environment-variables
 
 ## Run pipeline
-`snakemake --cores 1`
+```bash
+snakemake --cores 1
+```
 
-### LLM-based steps
-Also part of snakemake pipeleine, but could be run separately
+## LLM-based steps (optional standalone)
+These steps are also part of the Snakemake pipeline, but can be run separately.
 
-## LLM Labeling
+### LLM labeling
 ```bash
 python ./scripts/label_topics.py --out-csv ./data/processed/topic_labels.csv
 ```
-Possible group topics labels:
-`book_wishes`, 
-`nonbook_wishes`, 
-`thank`, 
-`other`
 
-Possible item label for `nonbook_wishes`
+### Wish extraction
+```bash
+python ./scripts/extract_books_wishes.py --out-csv ./data/processed/wishes_books.csv
+python ./scripts/extract_nonbook_wishes.py --out-csv ./data/processed/wishes_nonbook.csv
+```
+
+
+**Possible group topic labels:**
+- `book_wishes`
+- `nonbook_wishes`
+- `thank`
+- `other`
+
+**Nonbook item label (`nonbook_wishes`) categories**
 
 | category             | when to use (rules)                                                                                                                                                                                                               | typical items (examples)                                                                                                                                                                                                                                                   |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -46,6 +59,3 @@ Possible item label for `nonbook_wishes`
 | `facility_care`      | Use for **cleaning, upkeep, safety, basic comfort** of the place. Not for festive decor. If it supports day-to-day maintenance/cleanliness/comfort → this tag.                                                                    | швабра/ведро, хозяйственные принадлежности, моющие средства (если просят), стремянка, инструменты для мелкого ремонта, мусорные пакеты, шторы/жалюзи, коврики, базовые вещи для уюта/обустройства, освещение/лампы (если как “для помещения”, не сценический свет)         |
 | `event_decor`        | Use for **festive / special event vibe**: decorations, props, and event visuals. If it’s mainly for **праздники/мероприятия/оформление** → this tag.                                                                              | воздушные шары, стойка/арка для шаров, гирлянды, баннеры/растяжки, фотозона/фон, тематические украшения, конфетти, реквизит для праздника, костюмы/атрибуты для выступлений (если про “праздник/сцену”)                                                                    |
 | `other`              | Use only if it **doesn’t clearly fit** any category above or is too vague/ambiguous. Prefer `other` over guessing.                                                                                                                | “нужно разное для библиотеки”, “помощь чем сможете”, редкие специфические предметы без контекста, противоречивые запросы                                                                                                                                                   |
-
-
-

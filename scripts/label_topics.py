@@ -52,10 +52,12 @@ def batch_payload(places: list[TopicsPayload], max_places: int = 25):
         chunk = list(islice(it, max_places))
 
 
-
-
-def load_topics_with_first_message(topics_df: pd.DataFrame, messages_df: pd.DataFrame) -> pd.DataFrame:
-    topics_df["topic_title"] = topics_df["topic_title"].fillna("").astype(str).str.strip()
+def load_topics_with_first_message(
+    topics_df: pd.DataFrame, messages_df: pd.DataFrame
+) -> pd.DataFrame:
+    topics_df["topic_title"] = (
+        topics_df["topic_title"].fillna("").astype(str).str.strip()
+    )
 
     # Get first message per (place_id, topic_id) by smallest message_idx
     first_df = (
@@ -64,14 +66,18 @@ def load_topics_with_first_message(topics_df: pd.DataFrame, messages_df: pd.Data
         .first()[["place_id", "topic_id", "message_text"]]
         .rename(columns={"message_text": "first_message"})
     )
-    first_df["first_message"] = first_df["first_message"].fillna("").astype(str).apply(remove_emojis)
+    first_df["first_message"] = (
+        first_df["first_message"].fillna("").astype(str).apply(remove_emojis)
+    )
 
     # Left join so topics without messages still exist
     out = topics_df.merge(first_df, on=["place_id", "topic_id"], how="left")
     out["first_message"] = out["first_message"].fillna("")
 
     # Truncate for payload safety (keeps behavior stable; avoids context blowups)
-    out["first_message"] = out["first_message"].map(lambda s: s[:MAX_FIRST_MESSAGE_CHARS])
+    out["first_message"] = out["first_message"].map(
+        lambda s: s[:MAX_FIRST_MESSAGE_CHARS]
+    )
 
     # Stable ordering
     out = out.sort_values(["place_id", "topic_id"]).reset_index(drop=True)
@@ -111,7 +117,7 @@ def main() -> None:
 
     topics_csv = Path(args.topics_csv)
     messages_csv = Path(args.messages_csv)
-    
+
     if not topics_csv.exists():
         raise FileNotFoundError(f"topics.csv not found: {topics_csv}")
     if not messages_csv.exists():
@@ -155,7 +161,7 @@ def main() -> None:
     topic_labels_df = pd.DataFrame([row.model_dump() for row in all_rows])
     if not topic_labels_df.empty:
         topic_labels_df = topic_labels_df.sort_values(["place_id", "topic_id"])
-        
+
     df_out = topics_df.merge(topic_labels_df, on=["place_id", "topic_id"], how="left")
 
     df_out.to_csv(out_csv, index=False)
