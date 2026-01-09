@@ -8,7 +8,6 @@ import pandas as pd
 
 from src.dto.dto_group import BoardWithPlaceId
 
-
 logger = logging.getLogger(__name__)
 
 PLACES_COLUMNS = [
@@ -44,6 +43,7 @@ MESSAGES_COLUMNS = [
 @dataclass
 class Config:
     """Configuration for the flattening process."""
+
     geo_csv_path: Path
     groups_dir: Path
     output_dir: Path = Path("data/interim")
@@ -52,6 +52,7 @@ class Config:
 
 class FlattenedData(NamedTuple):
     """Container for flattened data from a single place."""
+
     place_data: dict[str, Any]
     topics_data: list[dict[str, Any]]
     messages_data: list[dict[str, Any]]
@@ -140,7 +141,9 @@ def load_group_data(groups_dir: Path, place_id: int) -> Optional[BoardWithPlaceI
         return None
 
     try:
-        return BoardWithPlaceId.model_validate_json(json_path.read_text(encoding="utf-8"))
+        return BoardWithPlaceId.model_validate_json(
+            json_path.read_text(encoding="utf-8")
+        )
     except Exception as e:
         logger.warning("Failed to parse JSON for place %s: %s", place_id, e)
         return None
@@ -241,7 +244,9 @@ def process_all_places(
         all_topic_data.extend(flattened.topics_data)
         all_message_data.extend(flattened.messages_data)
 
-    places_df = pd.DataFrame(all_place_data, columns=PLACES_COLUMNS).sort_values("place_id")
+    places_df = pd.DataFrame(all_place_data, columns=PLACES_COLUMNS).sort_values(
+        "place_id"
+    )
 
     topics_df = pd.DataFrame(all_topic_data, columns=TOPICS_COLUMNS)
     if not topics_df.empty:
